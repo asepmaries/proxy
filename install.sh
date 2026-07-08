@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROXY_PORT="${PROXY_PORT:-8080}"
+PROXY_PORT="${PROXY_PORT:-8765}"
 PROXY_USER="${PROXY_USER:-wdp}"
 PROXY_PASS="${PROXY_PASS:-}"
 ALLOW_CIDR="${ALLOW_CIDR:-0.0.0.0/0}"
