@@ -2,6 +2,10 @@
 
 One-command Squid HTTP proxy installer for Ubuntu VPS.
 
+The default proxy port is `443`, which is commonly allowed by cloud firewalls.
+The listener uses the HTTP proxy protocol (not an HTTPS website), so configure
+clients with an `http://` proxy URL even though the port is 443.
+
 ## Quick Install
 
 ```bash
@@ -32,6 +36,9 @@ curl -fsSL https://raw.githubusercontent.com/asepmaries/proxy/main/install.sh | 
 curl -fsSL https://raw.githubusercontent.com/asepmaries/proxy/main/install.sh | sudo env PROXY_USER='wdp' PROXY_PASS='yourStrongPassword' PROXY_PORT='8080' bash
 ```
 
+The installer stops before changing Squid if the selected port is already used
+by another service.
+
 ## Restrict Source IP
 
 Default allows any source IP, but requires username and password.
@@ -49,6 +56,11 @@ Replace values with the output from installer:
 ```bash
 curl -x http://USERNAME:PASSWORD@HOST:PORT https://api.ipify.org
 ```
+
+The installer also performs an authenticated request through Squid locally. If
+that passes but a test from your computer times out, allow inbound TCP traffic
+to the proxy port in the VPS provider's firewall or security group. Operating
+system firewall rules alone cannot open an AWS, GCP, or Azure cloud firewall.
 
 ## Supported OS
 

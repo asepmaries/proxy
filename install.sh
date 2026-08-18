@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROXY_PORT="${PROXY_PORT:-8765}"
+PROXY_PORT="${PROXY_PORT:-443}"
 PROXY_USER="${PROXY_USER:-wdp}"
 PROXY_PASS="${PROXY_PASS:-}"
 ALLOW_CIDR="${ALLOW_CIDR:-0.0.0.0/0}"
@@ -54,6 +54,27 @@ install_packages() {
   apt-get install -y squid apache2-utils curl ca-certificates
 }
 
+ensure_port_available() {
+  local listeners=""
+
+  if ! command -v ss >/dev/null 2>&1; then
+    return
+  fi
+
+  listeners="$(ss -H -ltnp "sport = :$PROXY_PORT" 2>/dev/null || true)"
+  if [ -z "$listeners" ]; then
+    return
+  fi
+
+  # Allow a re-run when this installer already configured Squid on the port.
+  if printf '%s' "$listeners" | grep -q '"squid"'; then
+    return
+  fi
+
+  printf '%s\n' "$listeners" >&2
+  fail "Port $PROXY_PORT sedang digunakan. Hentikan layanan tersebut atau pilih PROXY_PORT lain."
+}
+
 find_auth_helper() {
   for helper in \
     /usr/lib/squid/basic_ncsa_auth \
@@ -70,6 +91,11 @@ find_auth_helper() {
 
 configure_squid() {
   local auth_helper="$1"
+  local allowed_src="$ALLOW_CIDR"
+
+  if [ "$allowed_src" = "0.0.0.0/0" ]; then
+    allowed_src="all"
+  fi
 
   install -o proxy -g proxy -m 0640 /dev/null /etc/squid/passwd
   htpasswd -bc /etc/squid/passwd "$PROXY_USER" "$PROXY_PASS" >/dev/null
@@ -87,7 +113,7 @@ auth_param basic program $auth_helper /etc/squid/passwd
 auth_param basic realm WDP Proxy
 auth_param basic credentialsttl 12 hours
 acl authenticated proxy_auth REQUIRED
-acl allowed_src src $ALLOW_CIDR
+acl allowed_src src $allowed_src
 
 http_access allow allowed_src authenticated
 http_access deny all
@@ -110,6 +136,31 @@ EOF
   squid -k parse >/dev/null
   systemctl enable squid >/dev/null
   systemctl restart squid
+}
+
+test_proxy() {
+  local response=""
+  local url=""
+
+  for url in \
+    https://api.ipify.org \
+    https://ifconfig.me/ip \
+    https://icanhazip.com; do
+    response="$(
+      curl -4fsS --max-time 15 \
+        --proxy "http://127.0.0.1:$PROXY_PORT" \
+        --proxy-user "$PROXY_USER:$PROXY_PASS" \
+        "$url" 2>/dev/null | tr -d '[:space:]' || true
+    )"
+
+    if printf '%s' "$response" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+      log "Local authenticated proxy test passed ($response)"
+      return
+    fi
+  done
+
+  systemctl --no-pager --full status squid >&2 || true
+  fail "Squid aktif tetapi request melalui proxy lokal gagal"
 }
 
 open_firewall() {
@@ -167,6 +218,7 @@ print_result() {
 main() {
   need_root
   validate_input
+  ensure_port_available
   log "Installing Squid proxy"
   install_packages
   generate_password
@@ -175,6 +227,7 @@ main() {
   open_firewall
   log "Checking service"
   systemctl --no-pager --full status squid | sed -n '1,8p' || true
+  test_proxy
   print_result "$(detect_public_ip)"
 }
 
