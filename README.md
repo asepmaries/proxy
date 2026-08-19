@@ -6,6 +6,13 @@ The default proxy port is `443`, which is commonly allowed by cloud firewalls.
 The listener uses the HTTP proxy protocol (not an HTTPS website), so configure
 clients with an `http://` proxy URL even though the port is 443.
 
+Default credentials:
+
+```text
+Username: wdp
+Password: Extra0109@GO
+```
+
 ## Quick Install
 
 ```bash
@@ -36,8 +43,10 @@ curl -fsSL https://raw.githubusercontent.com/asepmaries/proxy/main/install.sh | 
 curl -fsSL https://raw.githubusercontent.com/asepmaries/proxy/main/install.sh | sudo env PROXY_USER='wdp' PROXY_PASS='yourStrongPassword' PROXY_PORT='8080' bash
 ```
 
-The installer stops before changing Squid if the selected port is already used
-by another service.
+If port `443` is occupied by the known `wdp-ssh-443.service`, the installer
+checks that the main SSH listener on port `22` is active, disables the extra SSH
+service, and then continues installing Squid automatically. Other port
+conflicts still stop the installer without changing the conflicting service.
 
 ## Restrict Source IP
 

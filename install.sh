@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 PROXY_PORT="${PROXY_PORT:-443}"
 PROXY_USER="${PROXY_USER:-wdp}"
-PROXY_PASS="${PROXY_PASS:-}"
+PROXY_PASS="${PROXY_PASS:-Extra0109@GO}"
 ALLOW_CIDR="${ALLOW_CIDR:-0.0.0.0/0}"
 OUTPUT_FILE="${OUTPUT_FILE:-/root/proxy.txt}"
 
@@ -36,22 +36,43 @@ validate_input() {
   fi
 }
 
-generate_password() {
-  if [ -n "$PROXY_PASS" ]; then
-    return
-  fi
-
-  if command -v openssl >/dev/null 2>&1; then
-    PROXY_PASS="$(openssl rand -base64 18 | tr -d '=+/[:space:]' | cut -c1-18)"
-  else
-    PROXY_PASS="$(date +%s%N | sha256sum | cut -c1-18)"
-  fi
-}
-
 install_packages() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   apt-get install -y squid apache2-utils curl ca-certificates
+}
+
+stop_alternate_ssh_443() {
+  local listeners="$1"
+  local ssh_22_listeners=""
+
+  if [ "$PROXY_PORT" != "443" ]; then
+    return 1
+  fi
+
+  if ! printf '%s' "$listeners" | grep -q '"sshd"'; then
+    return 1
+  fi
+
+  if ! systemctl is-active --quiet wdp-ssh-443.service; then
+    return 1
+  fi
+
+  ssh_22_listeners="$(ss -H -ltnp 'sport = :22' 2>/dev/null || true)"
+  if ! printf '%s' "$ssh_22_listeners" | grep -q '"sshd"'; then
+    printf '%s\n' "$listeners" >&2
+    fail "Tidak aman mematikan SSH port 443 karena SSH utama port 22 tidak listening"
+  fi
+
+  log "Port 443 dipakai SSH tambahan; disabling wdp-ssh-443.service"
+  systemctl disable --now wdp-ssh-443.service >/dev/null || \
+    fail "Gagal menonaktifkan wdp-ssh-443.service"
+
+  if systemctl is-active --quiet wdp-ssh-443.service; then
+    fail "wdp-ssh-443.service masih aktif setelah dinonaktifkan"
+  fi
+
+  log "SSH tambahan port 443 stopped; continuing proxy installation"
 }
 
 ensure_port_available() {
@@ -69,6 +90,13 @@ ensure_port_available() {
   # Allow a re-run when this installer already configured Squid on the port.
   if printf '%s' "$listeners" | grep -q '"squid"'; then
     return
+  fi
+
+  if stop_alternate_ssh_443 "$listeners"; then
+    listeners="$(ss -H -ltnp "sport = :$PROXY_PORT" 2>/dev/null || true)"
+    if [ -z "$listeners" ]; then
+      return
+    fi
   fi
 
   printf '%s\n' "$listeners" >&2
@@ -221,7 +249,6 @@ main() {
   ensure_port_available
   log "Installing Squid proxy"
   install_packages
-  generate_password
   log "Configuring authenticated proxy on port $PROXY_PORT"
   configure_squid "$(find_auth_helper)"
   open_firewall
