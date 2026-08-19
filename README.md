@@ -6,11 +6,12 @@ The default proxy port is `443`, which is commonly allowed by cloud firewalls.
 The listener uses the HTTP proxy protocol (not an HTTPS website), so configure
 clients with an `http://` proxy URL even though the port is 443.
 
-Default credentials:
+The default username is `wdp`. A new 18-character alphanumeric password is
+generated on every installation and printed when installation finishes:
 
 ```text
 Username: wdp
-Password: Extra0109@GO
+Password: generated automatically
 ```
 
 ## Quick Install

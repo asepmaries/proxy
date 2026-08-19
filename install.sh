@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 PROXY_PORT="${PROXY_PORT:-443}"
 PROXY_USER="${PROXY_USER:-wdp}"
-PROXY_PASS="${PROXY_PASS:-Extra0109@GO}"
+PROXY_PASS="${PROXY_PASS:-}"
 ALLOW_CIDR="${ALLOW_CIDR:-0.0.0.0/0}"
 OUTPUT_FILE="${OUTPUT_FILE:-/root/proxy.txt}"
 
@@ -33,6 +33,18 @@ validate_input() {
 
   if ! printf '%s' "$PROXY_USER" | grep -Eq '^[A-Za-z0-9._-]{1,32}$'; then
     fail "PROXY_USER hanya boleh huruf, angka, titik, underscore, minus. Maks 32 karakter."
+  fi
+}
+
+generate_password() {
+  if [ -n "$PROXY_PASS" ]; then
+    return
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    PROXY_PASS="$(openssl rand -base64 18 | tr -d '=+/[:space:]' | cut -c1-18)"
+  else
+    PROXY_PASS="$(date +%s%N | sha256sum | cut -c1-18)"
   fi
 }
 
@@ -249,6 +261,7 @@ main() {
   ensure_port_available
   log "Installing Squid proxy"
   install_packages
+  generate_password
   log "Configuring authenticated proxy on port $PROXY_PORT"
   configure_squid "$(find_auth_helper)"
   open_firewall
