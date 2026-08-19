@@ -48,6 +48,11 @@ checks that the main SSH listener on port `22` is active, disables the extra SSH
 service, and then continues installing Squid automatically. Other port
 conflicts still stop the installer without changing the conflicting service.
 
+The installer waits up to 10 minutes by default when Ubuntu's
+`unattended-upgrades` process holds the apt/dpkg lock. Temporary D-Bus resets
+during `systemctl enable` or `systemctl restart` are retried automatically.
+The wait can be changed with `APT_LOCK_TIMEOUT`, in seconds.
+
 ## Restrict Source IP
 
 Default allows any source IP, but requires username and password.

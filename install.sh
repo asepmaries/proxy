@@ -6,6 +6,8 @@ PROXY_USER="${PROXY_USER:-wdp}"
 PROXY_PASS="${PROXY_PASS:-Extra0109}"
 ALLOW_CIDR="${ALLOW_CIDR:-0.0.0.0/0}"
 OUTPUT_FILE="${OUTPUT_FILE:-/root/proxy.txt}"
+APT_LOCK_TIMEOUT="${APT_LOCK_TIMEOUT:-600}"
+SYSTEMCTL_RETRIES="${SYSTEMCTL_RETRIES:-5}"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -34,12 +36,60 @@ validate_input() {
   if ! printf '%s' "$PROXY_USER" | grep -Eq '^[A-Za-z0-9._-]{1,32}$'; then
     fail "PROXY_USER hanya boleh huruf, angka, titik, underscore, minus. Maks 32 karakter."
   fi
+
+  case "$APT_LOCK_TIMEOUT" in
+    ''|*[!0-9]*) fail "APT_LOCK_TIMEOUT harus angka" ;;
+  esac
+
+  case "$SYSTEMCTL_RETRIES" in
+    ''|*[!0-9]*) fail "SYSTEMCTL_RETRIES harus angka" ;;
+  esac
+
+  if [ "$SYSTEMCTL_RETRIES" -lt 1 ]; then
+    fail "SYSTEMCTL_RETRIES minimal 1"
+  fi
 }
 
 install_packages() {
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y squid apache2-utils curl ca-certificates
+  log "Waiting up to $APT_LOCK_TIMEOUT seconds for apt/dpkg locks"
+  apt-get \
+    -o "DPkg::Lock::Timeout=$APT_LOCK_TIMEOUT" \
+    -o Acquire::Retries=3 \
+    update
+  apt-get \
+    -o "DPkg::Lock::Timeout=$APT_LOCK_TIMEOUT" \
+    -o Acquire::Retries=3 \
+    install -y squid apache2-utils curl ca-certificates
+}
+
+systemctl_with_retry() {
+  local attempt=1
+  local output=""
+  local status=0
+
+  while [ "$attempt" -le "$SYSTEMCTL_RETRIES" ]; do
+    if output="$(systemctl "$@" 2>&1)"; then
+      if [ -n "$output" ]; then
+        printf '%s\n' "$output"
+      fi
+      return
+    else
+      status=$?
+    fi
+
+    printf '%s\n' "$output" >&2
+
+    if [ "$attempt" -ge "$SYSTEMCTL_RETRIES" ] || \
+      ! printf '%s' "$output" | grep -Eqi \
+        'D-Bus connection terminated|Failed to wait for response|Connection reset by peer|Failed to connect to bus'; then
+      return "$status"
+    fi
+
+    log "Transient systemctl/D-Bus error; retry $attempt/$SYSTEMCTL_RETRIES"
+    sleep 3
+    attempt=$((attempt + 1))
+  done
 }
 
 stop_alternate_ssh_443() {
@@ -65,7 +115,7 @@ stop_alternate_ssh_443() {
   fi
 
   log "Port 443 dipakai SSH tambahan; disabling wdp-ssh-443.service"
-  systemctl disable --now wdp-ssh-443.service >/dev/null || \
+  systemctl_with_retry disable --now wdp-ssh-443.service >/dev/null || \
     fail "Gagal menonaktifkan wdp-ssh-443.service"
 
   if systemctl is-active --quiet wdp-ssh-443.service; then
@@ -148,7 +198,6 @@ http_access deny all
 
 http_port 0.0.0.0:$PROXY_PORT
 
-via off
 forwarded_for delete
 request_header_access X-Forwarded-For deny all
 request_header_access Via deny all
@@ -162,8 +211,8 @@ access_log /var/log/squid/access.log squid
 EOF
 
   squid -k parse >/dev/null
-  systemctl enable squid >/dev/null
-  systemctl restart squid
+  systemctl_with_retry enable squid >/dev/null
+  systemctl_with_retry restart squid
 }
 
 test_proxy() {
